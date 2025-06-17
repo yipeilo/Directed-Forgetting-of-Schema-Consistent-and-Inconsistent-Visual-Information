@@ -1,0 +1,376 @@
+---
+title: "DF and familiarity, nonword"
+output: html_notebook
+---
+
+```{r, echo=FALSE, message=False}
+library(dplyr)
+library(tidyr)
+library(gtools)
+library(ggplot2)
+library(tidyverse)
+library(tibble)
+library(lme4)
+library(lmerTest)
+```
+
+
+```{r, echo=FALSE}
+cohen<- function(g1,g2){
+  d = as.numeric(t.test(g1,g2,paired = TRUE)$statistic /sqrt(length(g1)))
+  return(d)
+}
+
+calculate_se=function(x) sd(x)/sqrt(length(x)) 
+
+data = read.csv("nonword_data.csv")
+```
+
+
+```{r}
+data = as.data.frame(data)
+cols = c("attn_encode","acc_frac","time")
+
+data = data[!(data$ans == "t"|data$phase == ""),]
+data[is.na(data)] = 0
+data$RF[data$RF == ''] = 'new'
+
+data$acc_frac = ifelse(data$resp_frac == data$ans, 1, 0)
+
+data$hit = ifelse(data$acc_frac== 1 & data$ans == 'z', 1, 0)
+data$fa = ifelse(data$acc_frac == 0 & data$ans == 'm', 1, 0)
+data$miss = ifelse(data$acc_frac == 0 & data$ans == 'z', 1, 0)
+data$cr = ifelse(data$acc_frac == 1 & data$ans == 'm', 1, 0)
+```
+
+
+## Comparison R, F, baseline
+```{r}
+# d simple table for attention check
+# hit table
+miss = aggregate(miss ~ id, data = data[data$RF != "new",], FUN = sum)$miss
+hit_table = cbind(aggregate(hit ~ id, data = data[data$RF != "new",], FUN = sum),miss)
+hit_table$hitr = (hit_table$hit+0.5)/(hit_table$hit+hit_table$miss+1)
+# fa table
+cr = aggregate(cr ~ id, data = data[data$RF == "new",], FUN = sum)$cr
+fa_table = cbind(aggregate(fa ~ id, data = data[data$RF == "new",], FUN = sum), cr)
+fa_table$far = (fa_table$fa+0.5)/(fa_table$fa+fa_table$cr+1)
+# dprime table
+d_table = merge(hit_table, fa_table, by = 'id')
+d_table$dprime = qnorm(d_table$hitr) - qnorm(d_table$far)
+d_table = subset(d_table, select = c(id, dprime))
+```
+
+
+```{r}
+# hit table
+miss = aggregate(miss ~ id*RF*repeat_no*word_type, data = data[data$RF != "new",], FUN = sum)$miss
+hit_table = cbind(aggregate(hit ~ id*RF*repeat_no*word_type, data = data[data$RF != "new",], FUN = sum),miss)
+hit_table$hitr = (hit_table$hit+0.5)/(hit_table$hit+hit_table$miss+1)
+
+mean(hit_table[hit_table$repeat_no == "0" & hit_table$RF == "Remember" & hit_table$word_type == "nonword",]$hitr)
+calculate_se(hit_table[hit_table$repeat_no == "0" & hit_table$RF == "Remember"& hit_table$word_type == "nonword",]$hitr)
+
+mean(hit_table[hit_table$repeat_no == "0" & hit_table$RF == "Forget"& hit_table$word_type == "nonword",]$hitr)
+calculate_se(hit_table[hit_table$repeat_no == "0" & hit_table$RF == "Forget"& hit_table$word_type == "nonword",]$hitr)
+
+mean(hit_table[hit_table$repeat_no != "0" & hit_table$RF == "Remember"& hit_table$word_type == "nonword",]$hitr)
+calculate_se(hit_table[hit_table$repeat_no != "0" & hit_table$RF == "Remember"& hit_table$word_type == "nonword",]$hitr)
+
+mean(hit_table[hit_table$repeat_no != "0" & hit_table$RF == "Forget"& hit_table$word_type == "nonword",]$hitr)
+calculate_se(hit_table[hit_table$repeat_no != "0" & hit_table$RF == "Forget"& hit_table$word_type == "nonword",]$hitr)
+
+mean(hit_table[hit_table$repeat_no == "6" & hit_table$RF == "Remember"& hit_table$word_type == "nonword",]$hitr)
+calculate_se(hit_table[hit_table$repeat_no == "6" & hit_table$RF == "Remember"& hit_table$word_type == "nonword",]$hitr)
+
+mean(hit_table[hit_table$repeat_no == "6" & hit_table$RF == "Forget" & hit_table$word_type == "nonword",]$hitr)
+calculate_se(hit_table[hit_table$repeat_no == "6" & hit_table$RF == "Forget" & hit_table$word_type == "nonword",]$hitr)
+
+# fa table
+cr = aggregate(cr ~ id*RF*word_type, data = data[data$RF == "new",], FUN = sum)$cr
+fa_table = cbind(aggregate(fa ~ id*RF*word_type, data = data[data$RF == "new",], FUN = sum), cr)
+fa_table$far = (fa_table$fa+0.5)/(fa_table$fa+fa_table$cr+1)
+
+#mean(fa_table[fa_table$word_type=="nonword",]$far)
+#calculate_se(fa_table[fa_table$word_type=="nonword",]$far)
+
+# dprime table
+d_table = merge(hit_table, fa_table, by = c('id', "word_type"))
+d_table$dprime = qnorm(d_table$hitr) - qnorm(d_table$far)
+hitr_table = subset(d_table, select = c(id, dprime, RF.x, hitr, far, repeat_no, word_type))
+
+d_table = subset(d_table, select = c(id, dprime, RF.x, repeat_no, word_type))
+d_table = rename(d_table, condition = RF.x, Repeat = repeat_no, Type = word_type)
+
+d_table = d_table %>% arrange(id, Type, Repeat)
+```
+
+
+```{r}
+d_table$id = as.factor(d_table$id)
+d_table$condition = as.factor(d_table$condition)
+d_table$Repeat = as.factor(d_table$Repeat)
+
+mean(d_table$dprime)
+aov.1 = aov(dprime ~ condition*Repeat*Type + Error(id/(Repeat*condition*Type)), data = d_table[d_table$Repeat!=0,])
+summary(aov.1)
+
+aov.1 = aov(dprime ~ condition*Repeat + Error(id/(Repeat*condition)), data = d_table)
+summary(aov.1)
+t.rep = t.test(
+  (subset(d_table, Repeat=="0"&condition== "Forget"))$dprime,
+  (subset(d_table, Repeat=="0"&condition== "Remember"))$dprime, 
+  var.equal = T, paired = T)
+
+aov.1 = aov(dprime ~ Type*Repeat + Error(id/(Repeat*Type)), data = d_table)
+summary(aov.1)
+t.type = t.test(
+  (subset(d_table, Repeat=="2"&Type== "nonword"))$dprime,
+  (subset(d_table, Repeat=="0"&Type== "nonword"))$dprime, 
+  var.equal = T, paired = T)
+```
+```{r}
+a = t.test(
+  (subset(fa_table, word_type=="nonword"))$far,
+  (subset(fa_table, word_type=="word"))$far, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+```
+
+
+
+```{r}
+d_table$Repetition = ifelse(d_table$Repeat == 0, "non-previewed", "previewed")
+
+aov.1 = aov(dprime ~ condition*Repetition*Type + Error(id/(Repetition*condition*Type)), data = d_table)
+print(summary(aov.1), digits = 5)
+
+df_preview = aggregate(dprime~id*condition*Repetition, FUN = mean, data = d_table)
+a = t.test(
+  (subset(df_preview, Repetition=="non-previewed"&condition== "Forget"))$dprime,
+  (subset(df_preview, Repetition=="non-previewed"&condition== "Remember"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+a = cohen((subset(df_preview, Repetition=="non-previewed"&condition== "Forget"))$dprime,
+          (subset(df_preview, Repetition == "non-previewed"&condition == "Remember"))$dprime)
+print(a, digits = 5)
+
+a = t.test(
+  (subset(df_preview, Repetition=="previewed"&condition== "Forget"))$dprime,
+  (subset(df_preview, Repetition=="previewed"&condition== "Remember"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+cohen((subset(df_preview, Repetition=="previewed"&condition== "Forget"))$dprime,
+          (subset(df_preview, Repetition == "previewed"&condition == "Remember"))$dprime)
+
+a = t.test(
+  (subset(df_preview, Repetition=="previewed"&condition== "Forget"))$dprime,
+  (subset(df_preview, Repetition=="non-previewed"&condition== "Forget"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+cohen((subset(df_preview, Repetition=="previewed"&condition== "Forget"))$dprime,
+          (subset(df_preview, Repetition == "non-previewed"&condition == "Forget"))$dprime)
+
+a = t.test(
+  (subset(df_preview, Repetition=="previewed"&condition== "Remember"))$dprime,
+  (subset(df_preview, Repetition=="non-previewed"&condition== "Remember"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+cohen((subset(df_preview, Repetition=="previewed"&condition== "Remember"))$dprime,
+          (subset(df_preview, Repetition == "non-previewed"&condition == "Remember"))$dprime)
+```
+
+
+```{r}
+df_type = aggregate(dprime~id*condition*Type, FUN = mean, data = d_table)
+a = t.test(
+  (subset(df_type, condition== "Forget"&Type=="nonword"))$dprime,
+  (subset(df_type, condition == "Remember"&Type=="nonword"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+cohen((subset(df_type, condition== "Forget"&Type=="nonword"))$dprime,
+  (subset(df_type, condition == "Remember"&Type=="nonword"))$dprime)
+
+a = t.test(
+  (subset(df_type, condition== "Forget"&Type=="word"))$dprime,
+  (subset(df_type, condition == "Forget"&Type=="nonword"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+
+cohen((subset(df_type, Type=="nonword"&condition== "Remember"))$dprime,
+          (subset(df_type, Type == "word"&condition == "Remember"))$dprime)
+
+a = t.test(
+  (subset(df_type, condition== "Forget"&Type=="word"))$dprime,
+  (subset(df_type, condition == "Remember"&Type=="word"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+cohen((subset(df_type, condition== "Forget"&Type=="word"))$dprime,
+  (subset(df_type, condition == "Remember"&Type=="word"))$dprime)
+
+
+a = t.test(
+  (subset(df_type, Type=="word"&condition== "Forget"))$dprime,
+  (subset(df_type, Type=="nonword"&condition== "Forget"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+cohen((subset(df_type, Type=="word"&condition== "Forget"))$dprime,
+          (subset(df_type, Type == "nonword"&condition == "Forget"))$dprime)
+
+a = t.test(
+  (subset(df_type, Type=="word"&condition== "Remember"))$dprime,
+  (subset(df_type, Type=="nonword"&condition== "Remember"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+cohen((subset(df_type, Type=="word"&condition== "Remember"))$dprime,
+          (subset(df_type, Type == "nonword"&condition == "Remember"))$dprime)
+
+aggregate(dprime ~ condition, data = d_table, FUN = mean)
+```
+
+
+# Compare repetitions
+# Only repeated (compare 2 and 6)
+```{r}
+aov.1 = aov(dprime ~ condition*Repeat*Type + Error(id/(Repeat*condition*Type)), data = d_table[d_table$Repeat != 0, ])
+print(summary(aov.1), digit = 5)
+
+df_repeat = aggregate(dprime~id*condition*Repeat, FUN = mean, data = d_table[d_table$Repeat != 0, ])
+a = t.test(
+  (subset(df_repeat, Repeat=="2"&condition== "Forget"))$dprime,
+  (subset(df_repeat, Repeat=="2"&condition== "Remember"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+a = cohen((subset(df_repeat, Repeat=="2"&condition== "Forget"))$dprime,
+          (subset(df_repeat, Repeat=="2"&condition== "Remember"))$dprime)
+print(a, digits = 5)
+
+a = t.test(
+  (subset(df_repeat, Repeat=="6"&condition== "Forget"))$dprime,
+  (subset(df_repeat, Repeat=="6"&condition== "Remember"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+a = cohen((subset(df_repeat, Repeat=="6"&condition== "Forget"))$dprime,
+          (subset(df_repeat, Repeat=="6"&condition== "Remember"))$dprime)
+print(a, digits = 5)
+
+a = t.test(
+  (subset(df_repeat, Repeat=="2"&condition== "Forget"))$dprime,
+  (subset(df_repeat, Repeat=="6"&condition== "Forget"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+a = cohen((subset(df_repeat, Repeat=="2"&condition== "Forget"))$dprime,
+          (subset(df_repeat, Repeat=="6"&condition== "Forget"))$dprime)
+print(a, digits = 5)
+
+df_type = aggregate(dprime~id*condition*Type, FUN = mean, data = d_table[d_table$Repeat != 0, ])
+a = t.test(
+  (subset(df_type, Type=="word"&condition== "Forget"))$dprime,
+  (subset(df_type, Type=="word"&condition== "Remember"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+a = cohen((subset(df_type, Type=="word"&condition== "Forget"))$dprime,
+          (subset(df_type, Type=="word"&condition== "Remember"))$dprime)
+print(a, digits = 5)
+
+a = t.test(
+  (subset(df_type, Type=="nonword"&condition== "Forget"))$dprime,
+  (subset(df_type, Type=="nonword"&condition== "Remember"))$dprime, 
+  var.equal = T, paired = T)
+print(a, digits = 5)
+a = cohen((subset(df_type, Type=="nonword"&condition== "Forget"))$dprime,
+          (subset(df_type, Type=="nonword"&condition== "Remember"))$dprime)
+print(a, digits = 5)
+
+aggregate(dprime ~ condition, data = d_table[d_table$Repeat != 0, ], FUN = sd)
+```
+
+DF x Preview
+```{r}
+se = aggregate(dprime~condition*Repetition, data = d_table, FUN=calculate_se)
+figure_summary = cbind(aggregate(dprime~condition*Repetition, data =d_table, FUN=mean), se = se$dprime)
+colnames(figure_summary) = c("Cue","Preview","dprime","SE")
+figure_summary$`Cue` = as.factor(figure_summary$`Cue`)
+
+ggplot(figure_summary, aes(x=Preview, y=dprime, fill=`Cue`,
+                                    ymin = dprime-SE, ymax=dprime+SE))+
+  geom_bar(stat="identity", colour = "black", position=position_dodge())+  
+  labs(y = expression('Recognition Accuracy'~italic("d'")~""))+
+  coord_cartesian(ylim=c(0.5,1.75))+  
+  geom_errorbar(width=.3, position=position_dodge(.9))+
+  scale_fill_grey(start = 0.1, end = 0.9)+
+  theme_classic()+
+  theme(legend.title = element_text(size=15),legend.text = element_text(size=15))+
+  theme(axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.x = element_text(size = 18),
+        axis.title.y = element_text(size = 18))
+```
+DF x Type
+```{r}
+se = aggregate(dprime~condition*Type, data = d_table, FUN=calculate_se)
+figure_summary = cbind(aggregate(dprime~condition*Type, data =d_table, FUN=mean), se = se$dprime)
+colnames(figure_summary) = c("Cue","Stimulus Type","dprime","SE")
+
+figure_summary$`Stimulus Type`[figure_summary$`Stimulus Type` == "familiar"] = "Daily Object"
+figure_summary$`Stimulus Type`[figure_summary$`Stimulus Type` == "novel"] = "Novel Object"
+figure_summary$`Cue` = as.factor(figure_summary$`Cue`)
+
+ggplot(figure_summary, aes(x=`Stimulus Type`, y=dprime, fill=`Cue`,
+                                    ymin = dprime-SE, ymax=dprime+SE))+
+  geom_bar(stat="identity", colour = "black", position=position_dodge())+  
+  labs(y = expression('Recognition Accuracy'~italic("d'")~""))+
+  coord_cartesian(ylim=c(0.5,1.75))+  
+  geom_errorbar(width=.3, position=position_dodge(.9))+
+  scale_fill_grey(start = 0.1, end = 0.9)+
+  theme_classic()+
+  theme(legend.title = element_text(size=15),legend.text = element_text(size=15))+
+  theme(axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.x = element_text(size = 18),
+        axis.title.y = element_text(size = 18))
+```
+
+DF x Repetition(26)
+```{r}
+se = aggregate(dprime~condition*Repeat, data = d_table[d_table$Repeat != 0, ], FUN=calculate_se)
+figure_summary = cbind(aggregate(dprime~condition*Repeat, data =d_table[d_table$Repeat != 0, ], FUN=mean), se = se$dprime)
+colnames(figure_summary) = c("Cue","Repetition","dprime","SE")
+figure_summary$`Cue` = as.factor(figure_summary$`Cue`)
+
+ggplot(figure_summary, aes(x=Repetition, y=dprime, fill=`Cue`,
+                                    ymin = dprime-SE, ymax=dprime+SE))+
+  geom_bar(stat="identity", colour = "black", position=position_dodge())+  
+  labs(y = expression('Recognition Accuracy'~italic("d'")~""))+
+  coord_cartesian(ylim=c(0.5,1.75))+  
+  geom_errorbar(width=.3, position=position_dodge(.9))+
+  scale_fill_grey(start = 0.1, end = 0.9)+
+  theme_classic()+
+  theme(legend.title = element_text(size=15),legend.text = element_text(size=15))+
+  theme(axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.x = element_text(size = 18),
+        axis.title.y = element_text(size = 18))
+```
+
+```{r}
+se = aggregate(dprime~condition*Type, data = d_table[d_table$Repeat != 0, ], FUN=calculate_se)
+figure_summary = cbind(aggregate(dprime~condition*Type, data =d_table[d_table$Repeat != 0, ], FUN=mean), se = se$dprime)
+colnames(figure_summary) = c("Cue","Stimulus Type","dprime","SE")
+figure_summary$`Cue` = as.factor(figure_summary$`Cue`)
+figure_summary$`Stimulus Type` = factor(figure_summary$`Stimulus Type`, c("word", "nonword"))
+
+ggplot(figure_summary, aes(x=`Stimulus Type`, y=dprime, fill=`Cue`,
+                                    ymin = dprime-SE, ymax=dprime+SE))+
+  geom_bar(stat="identity", colour = "black", position=position_dodge())+  
+  labs(y = expression('Recognition Accuracy'~italic("d'")~""))+
+  coord_cartesian(ylim=c(0.5,1.75))+  
+  geom_errorbar(width=.3, position=position_dodge(.9))+
+  scale_fill_grey(start = 0.1, end = 0.9)+
+  theme_classic()+
+  theme(legend.title = element_text(size=15),legend.text = element_text(size=15))+
+  theme(axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.x = element_text(size = 18),
+        axis.title.y = element_text(size = 18))
+```
